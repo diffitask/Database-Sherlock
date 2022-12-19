@@ -57,7 +57,7 @@ Project for a university database course
 7. Таблица 'CRIME_X_DETECTIVE':
 <img src="/models/physical-model-sherlock/pm-7-crime-x-detective.png"/>
 
-8. Таблица 'CRIME_ORGANIZER':
+8. Таблица 'CRIME_X_ORGANIZER':
 <img src="/models/physical-model-sherlock/pm-8-crime-x-organizer.png"/>
 
 9. Таблица 'CRIME_X_VICTIM':
