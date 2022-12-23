@@ -104,6 +104,8 @@ from sherlock_db.crime_x_victim;
 -- count of the most often crime type for gang; count of crime organizers of this gang;
 -- and statistics about victims ages of this gang: min victim age, max victim age and average victim age
 
+drop view if exists gang_statistics;
+create view gang_statistics as
 with gangs_victims_ages as (select distinct ooc.crime_gang as crime_gang,
                                             cv.victim_id,
                                             cv.age         as victim_age
