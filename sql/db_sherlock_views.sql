@@ -6,7 +6,7 @@ create schema sherlock_db_views;
 set search_path = sherlock_db_views;
 
 
--- Creating views for each table
+-- Creating views for each table (TASK 7)
 
 -- 1) Place of crime
 drop view if exists v_place_of_crime;
@@ -95,17 +95,19 @@ select *
 from sherlock_db.crime_x_victim;
 
 
--- Creating complex views
+-- Creating complex views (TASK 8)
 
 -- (1)
--- For each gang, output statistics on it:
--- crime gang name;
--- most often crime type, that this gang committed -- if several types occur the same number of times and they are the most popular for this gang, output both crime types;
--- count of the most often crime type for gang; count of crime organizers of this gang;
--- and statistics about victims ages of this gang: min victim age, max victim age and average victim age
+-- Сделать view, содержащую статистику по каждой преступной группировке:
+-- название преступной группировки
+-- наиболее часто встречаемый тип преступления среди всех преступлений, совершенных этой бандой
+-- (если несколько типов встречаются одинаковое кол-во раз и являются наиболее частыми для этой группировки, вывести все эти типы)
+-- сколько раз встречается наиболее частый тип преступления среди преступлений группировки
+-- кол-во организаторов преступлений, состоящих в группировке
+-- статистика по возрастам жертв банды: минимальный возраст жертвы, максимальный, и средний
 
-drop view if exists gang_statistics;
-create view gang_statistics as
+drop view if exists v_gang_statistics;
+create view v_gang_statistics as
 with gangs_victims_ages as (select distinct ooc.crime_gang as crime_gang,
                                             cv.victim_id,
                                             cv.age         as victim_age
@@ -165,20 +167,20 @@ from victim_ages_statistics vas
 
 
 -- (2)
--- For each crime, output a summary of the data on it:
--- crime name; crime type; crime place; all victims, organizers and detectives of crime -- each group is output as an array in one cell of the table;
--- episode code of crime of TV series.
--- Than sort crimes in asc order of episode codes
+-- Сделать view, содержащую сводку по каждому преступлению:
+-- название преступления; тип преступления; место преступления; все жертвы, организаторы и детективы, задействованные в преступлении (перечисленные группы выводить списком)
+-- код эпизода сериала, в котором показано преступление.
+-- Отсортировать полученные преступления в возрастающем порядке кодов эпизодов
 
 drop view if exists v_crime_statistics;
 create view v_crime_statistics as
 select cr.crime_name,
        cr.crime_type,
-       poc.place_name                         as crime_place,
-       array_agg(distinct cv.victim_name)     as crime_victims,
-       array_agg(distinct ooc.organizer_name) as crime_organizers,
-       array_agg(distinct cxd.detective_name) as crime_detectives,
-       cr.episode_code                        as crime_episode_code
+       poc.place_name                             as crime_place,
+       array_agg(distinct cv.victim_name)         as crime_victims,
+       array_agg(distinct ooc.organizer_name)     as crime_organizers,
+       array_agg(distinct cxd.detective_name)     as crime_detectives,
+       cr.episode_code                            as crime_episode_code
 from sherlock_db.crime cr
          left join
      sherlock_db.crime_x_victim cxv on cr.crime_id = cxv.crime_id
@@ -194,3 +196,47 @@ from sherlock_db.crime cr
      sherlock_db.crime_x_detective cxd on cr.crime_id = cxd.crime_id
 group by cr.crime_id, episode_code, crime_place
 order by cr.episode_code;
+
+
+-- (3)
+-- Сделать view, для каждого детектива содержащую информацию о времени, затрачиваемого им на расследования дел.
+-- Для детектива по каждому делу давать информацию о:
+-- времени, которое дететив потратил на расследование этого дела (в днях)
+-- на сколько дней больше детектив работал над этим делом в сравнении со временем над предыдущим преступлением этого следователя
+-- во сколько раз меньше времени детектив потратил на это дело относительно среднего времени, которое этот детектив тратил на расследуемые им дела (округлить до 3-х знаков после запятой)
+
+drop view if exists v_detective_crimes_duration;
+create view v_detective_crimes_duration as
+with detective_crimes as (select dt.detective_name                                             as detective_name,
+                                 cr.crime_name                                                 as crime_name,
+                                 (least(cxd.valid_to_date, now()::date) - cxd.valid_from_date) as investigation_duration
+                          from sherlock_db.detective dt
+                                   inner join
+                               sherlock_db.crime_x_detective cxd on dt.detective_name = cxd.detective_name
+                                   inner join
+                               sherlock_db.crime cr on cxd.crime_id = cr.crime_id
+                          order by detective_name
+), detective_avg_duration as (
+    select
+        dc.detective_name,
+        sum (dc.investigation_duration) / count(dc.crime_name) as detective_avg_investigation_duration
+    from
+        detective_crimes dc
+    group by
+        detective_name
+)
+select
+    dc.detective_name,
+    dc.crime_name,
+    dc.investigation_duration as cur_crime_inv_duration,
+    lag(dc.investigation_duration, 1, 0) over (order by dc.detective_name) as prev_crime_inv_duration,
+    case
+        when dadr.detective_avg_investigation_duration = 0
+            then '\inf'
+        else
+            (dc.investigation_duration / 1.0 / dadr.detective_avg_investigation_duration)::numeric(17, 3)::text
+        end as how_many_longer_over_avg
+from
+    detective_crimes dc
+inner join
+    detective_avg_duration dadr on dc.detective_name = dadr.detective_name;

@@ -5,7 +5,7 @@ create schema sherlock_db;
 set search_path = sherlock_db;
 
 
--- Tables creating
+-- Tables creating (TASK 3)
 
 -- 1) Place of crime
 drop table if exists place_of_crime cascade;
@@ -118,7 +118,7 @@ create table crime_x_victim
 );
 
 
--- Tables filling
+-- Tables filling (TASK 4)
 
 -- 1) Place of crime
 insert into place_of_crime(place_id, place_name, location_city)
@@ -177,7 +177,7 @@ values (1, 'Jim Moriarty',
         'Jealousy'),
        (6, 'Bob Frankland',
         'Criminal was intimidating Henry so that he could not restore the true events in his memory',
-        'Hiding evidence'),
+        'Jealousy'), -- Hiding evidence
        (7, 'Jonathan Small',
         'Criminal was taking revenge on the major for the death of his brother',
         'Revenge');
@@ -190,13 +190,13 @@ values (1, 'Jennifer Wilson', 'Female', 45),
        (4, 'John Watson', 'Male', 34),
        (5, 'Sarah Sawyer', 'Female', 31),
        (6, 'Henry Knight', 'Male', 25),
-       (7, 'Henry Knight''s father', 'Male', 43),
+       (7, 'Martin Knight', 'Male', 43),
        (8, 'Sherlock Holmes', 'Male', 34),
        (9, 'Major Sholto', 'Male', 52);
 
 -- 7) Crime X Detective
 insert into crime_x_detective(detective_name, crime_id, valid_from_date, valid_to_date)
-values ('Greg Lestrade', 1, '2010-04-03'::date, '2010-04-20'::date),
+values ('Greg Lestrade', 1, '2010-04-03'::date, '2049-04-20'::date),
        ('Sherlock Holmes', 1, '2010-04-03'::date, '2010-04-20'::date),
        ('John Watson', 1, '2010-04-04'::date, '2010-04-20'::date),
        ('Molly Hooper', 1, '2010-04-06'::date, '2010-04-06'::date),
@@ -211,9 +211,9 @@ values ('Greg Lestrade', 1, '2010-04-03'::date, '2010-04-20'::date),
        ('Sherlock Holmes', 6, '2012-10-15'::date, '2012-10-23'::date),
        ('John Watson', 6, '2012-10-15'::date, '2012-10-23'::date),
        ('Greg Lestrade', 6, '2012-10-10'::date, '2012-10-23'::date),
-       ('Sherlock Holmes', 6, '2014-03-11'::date, '2014-03-13'::date),
-       ('John Watson', 6, '2014-03-11'::date, '2014-03-13'::date),
-       ('Mary Watson', 6, '2014-03-11'::date, '2014-03-13'::date);
+       ('Sherlock Holmes', 7, '2014-03-11'::date, '2014-03-13'::date),
+       ('John Watson', 7, '2014-03-11'::date, '2014-03-13'::date),
+       ('Mary Watson', 7, '2014-03-11'::date, '2014-03-13'::date);
 
 -- 8) Crime X Organizer
 insert into crime_x_organizer(crime_id, organizer_name, instrument_of_crime, organizer_punishment_type)
@@ -242,7 +242,7 @@ values (1, 1, 'Hard'),
        (7, 9, 'Average');
 
 
--- CRUD-requests (9)
+-- CRUD-requests (TASK 5)
 
 -- for table 'Detective'
 insert into detective(detective_name, gender, main_job)
@@ -294,3 +294,150 @@ delete
 from crime_victim
 where age > 59;
 
+
+-- Requests to db (TASK 6)
+
+-- (1)
+-- Для каждого преступления вывести дату начала расследования (когда первый из детективов дела начал работу над преступлением)
+-- дату окончания расследования (если еще не окончено -- вывести дату из далекого будущего)
+-- продолжительность расследования на текущий момент, выраженную в днях
+-- во сколько раз расследование текущего преступление производилось дольше, чем расследование следующего за ним по дате преступления
+-- Отсортировать полученные в результате преступления в порядке убывания продолжительности их расследования
+-- и затем в порядке возрастания даты начала расследования
+
+with crimes_dates as (select cr.crime_name                              as crime_name,
+                             min(cxd.valid_from_date)                   as investigation_start_date,
+                             max(cxd.valid_to_date)                     as investigation_end_date,
+                             least(max(cxd.valid_to_date), now()::date) as investigation_end_date_or_now
+                      from detective dt
+                               inner join
+                           crime_x_detective cxd on dt.detective_name = cxd.detective_name
+                               inner join
+                           crime cr on cxd.crime_id = cr.crime_id
+                      group by cr.crime_id),
+     crimes_duration as (select *,
+                                (cd.investigation_end_date_or_now - cd.investigation_start_date) as investigation_duration
+                         from crimes_dates cd),
+     next_duration as (select *,
+                              lead(cd.investigation_duration, 1, 0)
+                              over (order by cd.investigation_start_date) as next_crime_duration
+                       from crimes_duration cd)
+select cd.crime_name,
+       cd.investigation_start_date,
+       cd.investigation_end_date,
+       cd.investigation_duration,
+       (cd.investigation_duration - cd.next_crime_duration) as diff_w_next_crime_duration
+from next_duration cd
+order by investigation_duration desc, investigation_start_date;
+
+
+-- (2)
+-- Для каждого организатора преступлений, кто совершил хотя бы одно убийство,
+-- вывести количество совершенных им убийств и ранговый номер среди всех убийц в порядке количества убийств.
+-- Отсортировать организаторов в порядке убывания числа убийств и затем в алфавитном порядке по имени.
+
+with organizers_mudrers_cnt as (select ooc.organizer_name as organizer_name,
+                                       count(cr.crime_id) as murders_count
+                                from organizer_of_crime ooc
+                                         inner join
+                                     crime_x_organizer cxo on ooc.organizer_name = cxo.organizer_name
+                                         inner join
+                                     crime cr on cxo.crime_id = cr.crime_id
+                                where cr.crime_type = 'Murder'
+                                group by ooc.organizer_name
+                                having count(cr.crime_id) > 1)
+select omc.organizer_name,
+       omc.murders_count,
+       dense_rank() over (order by murders_count) as murder_cnt_dense_rank
+from organizers_mudrers_cnt omc
+order by murders_count desc, organizer_name;
+
+
+-- (3)
+-- Для каждого организатора вывести тип мотива, который встречался в его преступлениях чаще всего.
+-- Отсортировать организаторов в алфавитном порядке по имени.
+
+with organizer_motive as (select ooc.organizer_name as organizer_name,
+                                 mt.motive_type     as motive_type
+                          from organizer_of_crime ooc
+                                   inner join
+                               motive mt on ooc.organizer_name = mt.organizer_name),
+     organizer_motive_cnt as (select distinct owm.organizer_name,
+                                              owm.motive_type,
+                                              count(owm.motive_type)
+                                              over (partition by owm.organizer_name, owm.motive_type) as organizer_motive_cnt
+                              from organizer_motive owm),
+     organizer_max_motive_type as (select omc.organizer_name,
+                                          max(omc.organizer_motive_cnt) over (partition by omc.organizer_name) as max_org_motive_cnt
+                                   from organizer_motive_cnt omc)
+select omc.organizer_name as organizer_name,
+       omc.motive_type    as most_often_motive_type
+from organizer_motive_cnt omc
+         inner join organizer_max_motive_type ommt on omc.organizer_name = ommt.organizer_name
+where omc.organizer_motive_cnt = ommt.max_org_motive_cnt
+order by organizer_name;
+
+
+-- (4)
+-- Вывести организаторов преступления, у которых суммарное число жертв во всех преступлениях > 3 (с возможными повторениями жертв;
+-- интересуемся именно тем, сколько раз организатор навредил кому-либо), и которые совершили хотя бы одно преступление в Лондоне.
+
+-- организаторы, у которых суммарное число жертв во всех преступлениях > 3
+with org_w_crime_victims_cnt as (select ooc.organizer_name   as organizer_name,
+                                        cr.crime_id          as crime_id,
+                                        count(cxv.victim_id) as victims_cnt
+                                 from organizer_of_crime ooc
+                                          inner join
+                                      crime_x_organizer cxo on ooc.organizer_name = cxo.organizer_name
+                                          inner join crime cr on cxo.crime_id = cr.crime_id
+                                          inner join crime_x_victim cxv on cr.crime_id = cxv.crime_id
+                                 group by ooc.organizer_name, cr.crime_id),
+     org_victims_sum as (select distinct owc.organizer_name,
+                                         sum(owc.victims_cnt) over (partition by owc.organizer_name) as org_victims_sum_cnt
+                         from org_w_crime_victims_cnt owc)
+select ovs.organizer_name
+from org_victims_sum ovs
+where ovs.org_victims_sum_cnt > 3
+
+intersect
+
+-- организаторы, которые совершили хотя бы одно преступление в Лондоне
+select distinct ooc.organizer_name
+from organizer_of_crime ooc
+         inner join
+     crime_x_organizer cxo on ooc.organizer_name = cxo.organizer_name
+         inner join
+     crime cr on cxo.crime_id = cr.crime_id
+         inner join
+     place_of_crime poc on cr.place_id = poc.place_id
+where poc.location_city = 'London';
+
+
+-- (5)
+-- Для каждого детектива вывести имя и возраст самой младшей жертвы, которая встречалась в расследуемых им преступлениях.
+-- Если несколько жертв имеют один и тот же возраст и они являются самыми младшими для следователя, вывести всех.
+-- Отсортировать результат в алфавитном порядке по имени следователя.
+
+with detective_victims_age as (select dt.detective_name as detective_name,
+                                      cv.victim_name as victim_name,
+                                      cv.age as victim_age,
+                                      dense_rank() over (partition by dt.detective_name order by cv.age) as victims_age_rank
+                               from detective dt
+                                        inner join
+                                    crime_x_detective cxd on dt.detective_name = cxd.detective_name
+                                        inner join
+                                    crime cr on cr.crime_id = cxd.crime_id
+                                        inner join
+                                    crime_x_victim cxv on cr.crime_id = cxv.crime_id
+                                        inner join
+                                    crime_victim cv on cxv.victim_id = cv.victim_id)
+select
+    dva.detective_name,
+    dva.victim_name,
+    dva.victim_age
+from
+    detective_victims_age dva
+where
+    dva.victims_age_rank = 1
+order by
+    detective_name;
